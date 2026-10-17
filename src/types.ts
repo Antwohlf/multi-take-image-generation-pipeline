@@ -6,6 +6,7 @@ export type ProviderName = "fixture" | "manual" | "openai";
 export type ApprovalStatus = "pending" | "approved" | "rejected";
 
 export interface VariantSpec {
+  output?: PipelineManifest["output"];
   id: string;
   references: string[];
   variables: Record<string, Scalar>;
@@ -24,6 +25,8 @@ export interface PipelineManifest {
     height: number;
     fit: ImageFit;
     format: ImageFormat;
+    /** Reject framing changes above 0.5% instead of cropping or padding. */
+    preserveFraming?: boolean;
   };
   generation: {
     provider: ProviderName;
@@ -38,6 +41,8 @@ export interface PipelineManifest {
 }
 
 export interface PlanJob {
+  output: PipelineManifest["output"];
+  referenceHashes: Record<string, string>;
   id: string;
   fileName: string;
   prompt: string;
@@ -62,6 +67,7 @@ export interface ApprovalDecision {
   status: ApprovalStatus;
   note?: string;
   decidedAt?: string;
+  candidateSha256?: string;
 }
 
 export interface ApprovalFile {

@@ -24,13 +24,21 @@ export const normalizeImages = async (
     const source = path.join(rawDirectory, job.fileName);
     if (!(await exists(source))) continue;
     const output = path.join(candidateDirectory, job.fileName);
-    const pipeline = sharp(source).resize(plan.output.width, plan.output.height, {
-      fit: plan.output.fit,
+    if (job.output.preserveFraming) {
+      const metadata = await sharp(source).metadata();
+      const sourceRatio = (metadata.width ?? 0) / (metadata.height ?? 1);
+      const targetRatio = job.output.width / job.output.height;
+      if (Math.abs(sourceRatio / targetRatio - 1) > 0.005) {
+        throw new Error(`Framing mismatch for ${job.id}: ${metadata.width}x${metadata.height}; refusing crop, padding, or stretch`);
+      }
+    }
+    const pipeline = sharp(source).resize(job.output.width, job.output.height, {
+      fit: job.output.preserveFraming ? "fill" : job.output.fit,
       position: "centre",
       background: { r: 12, g: 14, b: 18, alpha: 1 },
     });
-    if (plan.output.format === "jpeg") await pipeline.jpeg({ quality: 92 }).toFile(output);
-    else if (plan.output.format === "webp") await pipeline.webp({ quality: 92 }).toFile(output);
+    if (job.output.format === "jpeg") await pipeline.jpeg({ quality: 92 }).toFile(output);
+    else if (job.output.format === "webp") await pipeline.webp({ quality: 92 }).toFile(output);
     else await pipeline.png({ compressionLevel: 9 }).toFile(output);
   }
 };
@@ -57,10 +65,10 @@ export const validateImages = async (
       width = metadata.width;
       height = metadata.height;
       format = metadata.format;
-      if (width !== plan.output.width || height !== plan.output.height) {
-        errors.push(`expected ${plan.output.width}x${plan.output.height}, received ${width ?? "?"}x${height ?? "?"}`);
+      if (width !== job.output.width || height !== job.output.height) {
+        errors.push(`expected ${job.output.width}x${job.output.height}, received ${width ?? "?"}x${height ?? "?"}`);
       }
-      if (format !== plan.output.format) errors.push(`expected ${plan.output.format}, received ${format ?? "unknown"}`);
+      if (format !== job.output.format) errors.push(`expected ${job.output.format}, received ${format ?? "unknown"}`);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "unreadable image");
     }
@@ -127,7 +135,7 @@ export const createContactSheet = async (
     const left = (index % columns) * tileWidth;
     const top = Math.floor(index / columns) * (tileHeight + labelHeight);
     const image = await sharp(await readFile(filePath))
-      .resize(tileWidth, tileHeight, { fit: "cover" })
+      .resize(tileWidth, tileHeight, { fit: "contain", background: "#0e1117" })
       .toBuffer();
     const label = Buffer.from(`<svg width="${tileWidth}" height="${labelHeight}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#171b23"/><text x="16" y="31" fill="#f7f8fa" font-family="Arial, sans-serif" font-size="20" font-weight="600">${escapeXml(job.id)}</text></svg>`);
     composites.push({ input: image, left, top });

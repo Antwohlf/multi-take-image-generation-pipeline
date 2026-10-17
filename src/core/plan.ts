@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { PipelineManifest, PipelinePlan, Scalar } from "../types.js";
-import { sha256 } from "./io.js";
+import { sha256, sha256File } from "./io.js";
 import { parseManifest } from "./schema.js";
 import { assertSafeFileName, renderTemplate, slugify } from "./template.js";
 
@@ -22,7 +22,7 @@ const expandAxes = (
 const stablePlanValue = (plan: Omit<PipelinePlan, "planHash">): string =>
   JSON.stringify(plan);
 
-export const buildPlan = (manifest: PipelineManifest): PipelinePlan => {
+export const buildPlan = (manifest: PipelineManifest, referenceHashes: Record<string, string> = {}): PipelinePlan => {
   const combinations = expandAxes(Object.entries(manifest.axes));
   const jobs = manifest.variants.flatMap((variant) =>
     combinations.map((axisValues) => {
@@ -38,19 +38,24 @@ export const buildPlan = (manifest: PipelineManifest): PipelinePlan => {
       const fileName = renderTemplate(manifest.namingTemplate, renderingVariables);
       assertSafeFileName(fileName);
       const promptHash = sha256(prompt);
+      const output = variant.output ?? manifest.output;
+      const jobReferenceHashes = Object.fromEntries(variant.references.map(reference => [reference, referenceHashes[reference] ?? "unresolved"]));
       const fingerprint = sha256(JSON.stringify({
         id,
         prompt,
         references: variant.references,
-        output: manifest.output,
+        referenceHashes: jobReferenceHashes,
+        output,
       }));
       return {
         id,
+        output,
         fileName,
         prompt,
         promptHash,
         fingerprint,
         references: [...variant.references],
+        referenceHashes: jobReferenceHashes,
         variables,
       };
     }),
@@ -83,9 +88,13 @@ export const loadManifestAndPlan = async (
 ): Promise<{ manifest: PipelineManifest; plan: PipelinePlan; manifestDirectory: string }> => {
   const absolutePath = path.resolve(manifestPath);
   const manifest = parseManifest(JSON.parse(await readFile(absolutePath, "utf8")));
+  const referenceHashes: Record<string, string> = {};
+  for (const reference of new Set(manifest.variants.flatMap(variant => variant.references))) {
+    referenceHashes[reference] = await sha256File(path.resolve(path.dirname(absolutePath), reference));
+  }
   return {
     manifest,
-    plan: buildPlan(manifest),
+    plan: buildPlan(manifest, referenceHashes),
     manifestDirectory: path.dirname(absolutePath),
   };
 };

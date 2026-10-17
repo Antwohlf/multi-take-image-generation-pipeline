@@ -1,10 +1,10 @@
-import { access } from "node:fs/promises";
+import { access, rm } from "node:fs/promises";
 import path from "node:path";
 import { getAdapter } from "../adapters/index.js";
-import type { PipelineRunReport, ProviderName } from "../types.js";
+import type { PipelinePlan, PipelineRunReport, ProviderName } from "../types.js";
 import { ensureApprovalFile, writeReleaseManifest } from "./approvals.js";
 import { createContactSheet, normalizeImages, validateImages } from "./images.js";
-import { ensureDirectory, relativeDisplayPath, sleep, writeJson } from "./io.js";
+import { ensureDirectory, readJson, relativeDisplayPath, sleep, writeJson } from "./io.js";
 import { loadManifestAndPlan } from "./plan.js";
 
 const exists = async (filePath: string): Promise<boolean> => {
@@ -41,9 +41,17 @@ export const runPipeline = async (options: RunOptions): Promise<PipelineRunRepor
     ensureDirectory(inboxDirectory),
   ]);
 
+  // A prior success must never survive a failed or incomplete rerun.
+  await rm(releaseManifestPath, { force: true });
   const { plan, manifestDirectory } = await loadManifestAndPlan(options.manifestPath);
   const provider = options.provider ?? plan.generation.provider;
   const adapter = getAdapter(provider);
+  if (await exists(planPath)) {
+    const previous = await readJson<PipelinePlan>(planPath);
+    if (previous.planHash !== plan.planHash) {
+      throw new Error("Work directory belongs to a different plan or reference bytes; use a new work directory");
+    }
+  }
   await writeJson(planPath, plan);
   const counts = {
     total: plan.jobs.length,
@@ -99,6 +107,15 @@ export const runPipeline = async (options: RunOptions): Promise<PipelineRunRepor
 
   await normalizeImages(plan, rawDirectory, candidateDirectory);
   const validation = await validateImages(plan, candidateDirectory, validationPath);
+  for (const job of plan.jobs) {
+    const decision = approvals.decisions[job.id];
+    const item = validation.items.find(item => item.id === job.id);
+    if (decision?.status === "approved" && (!item?.valid || !decision.candidateSha256 || decision.candidateSha256 !== item.sha256)) {
+      approvals.decisions[job.id] = { status: "pending", note: "Candidate changed or failed validation; review these exact bytes again." };
+    }
+  }
+  await writeJson(approvalsPath, approvals);
+  counts.approved = Object.values(approvals.decisions).filter(decision => decision.status === "approved").length;
   if (!validation.valid) {
     const report: PipelineRunReport = {
       ...reportBase,
