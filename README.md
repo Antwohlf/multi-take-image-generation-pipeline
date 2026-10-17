@@ -105,6 +105,35 @@ pnpm multitake run \
 
 The release manifest is written only when validation and approval policies pass.
 
+## Preserve a selected visual style
+
+Use one approved image as the shared style reference and a separate scene image
+as the composition reference. Build the seasonal anchor first, derive the clear
+time-of-day family from that anchor, then derive weather from its matching time.
+Keep each native output and the exact generation request; a filename or a contact
+sheet alone is not provenance or visual acceptance.
+
+Reference file contents are hashed when the manifest is loaded. Changing a
+reference changes the plan and job fingerprints. A work directory cannot be
+reused with a different plan; use a new directory for a revised take.
+
+Set `output.preserveFraming: true` to reject source aspect-ratio differences over
+0.5% rather than silently crop, pad, or stretch an image. Small pixel-rounding
+differences are resized without cropping. A variant may provide its own complete
+`output` object when scenes have different aspect ratios. Contact sheets show
+the full frame. Output dimensions are a delivery contract, not a claim of native
+generation resolution; keep the native image and review it directly.
+
+Approvals include the SHA-256 of the reviewed candidate. Changed or invalid
+candidates return to pending, missing decisions block a complete-family release,
+and stale release manifests are removed before every run. Old approval files
+without candidate hashes require a new review. `approve --all` verifies current
+candidate bytes against the current validation report before recording decisions.
+
+Visual review must also check composition, rendering style, lighting, seasonal
+cues, repeated textures, important lettering and viewport crops. These judgments
+are not established by dimensions, hashes or a passing validation report.
+
 ## Direct OpenAI generation
 
 The OpenAI adapter uses `gpt-image-2` through the Image API, with the dated snapshot pinned in the example manifest. Reference-driven jobs use image editing; text-only jobs use image generation. Paid calls require explicit confirmation.

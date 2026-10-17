@@ -31,7 +31,8 @@ export const manualAdapter: GenerationAdapter = {
       fingerprint: context.job.fingerprint,
       references: context.job.references.map((reference) =>
         path.resolve(context.manifestDirectory, reference)),
-      output: context.plan.output,
+      referenceHashes: context.job.referenceHashes,
+      output: context.job.output,
       instructions: `Generate the image, preserve the supplied references where requested, and place the result at ${inboxPath}`,
     });
     return { status: "pending", requestPath };

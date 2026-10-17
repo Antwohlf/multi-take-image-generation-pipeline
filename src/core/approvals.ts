@@ -1,7 +1,7 @@
-import { access } from "node:fs/promises";
+import { access, rm } from "node:fs/promises";
 import path from "node:path";
 import type { ApprovalFile, PipelinePlan, ValidationReport } from "../types.js";
-import { readJson, writeJson } from "./io.js";
+import { readJson, sha256File, writeJson } from "./io.js";
 
 const exists = async (filePath: string): Promise<boolean> => {
   try {
@@ -37,9 +37,20 @@ export const approveAll = async (filePath: string, expectedPlanHash?: string): P
   if (expectedPlanHash && approvals.planHash !== expectedPlanHash) {
     throw new Error("Approval file belongs to a different plan");
   }
+  const root = path.dirname(filePath);
+  const plan = await readJson<PipelinePlan>(path.join(root, "plan.json"));
+  if (plan.planHash !== approvals.planHash) throw new Error("Approval file belongs to a different plan");
+  const validation = await readJson<ValidationReport>(path.join(root, "validation.json"));
+  if (!validation.valid || validation.planHash !== approvals.planHash) {
+    throw new Error("Approval requires successful validation of the same plan");
+  }
   const decidedAt = new Date().toISOString();
-  for (const id of Object.keys(approvals.decisions)) {
-    approvals.decisions[id] = { status: "approved", decidedAt };
+  for (const { id } of plan.jobs) {
+    const item = validation.items.find(item => item.id === id);
+    if (!item?.sha256 || !item.valid || await sha256File(path.join(root, "candidates", item.fileName)) !== item.sha256) {
+      throw new Error(`Candidate changed or has not passed validation: ${id}`);
+    }
+    approvals.decisions[id] = { status: "approved", decidedAt, candidateSha256: item.sha256 };
   }
   await writeJson(filePath, approvals);
 };
@@ -51,10 +62,19 @@ export const writeReleaseManifest = async (
   candidateDirectory: string,
   outputPath: string,
 ): Promise<boolean> => {
-  const approvedJobs = plan.jobs.filter((job) => approvals.decisions[job.id]?.status === "approved");
-  const hasPending = plan.jobs.some((job) => approvals.decisions[job.id]?.status === "pending");
-  const hasRejected = plan.jobs.some((job) => approvals.decisions[job.id]?.status === "rejected");
-  if (!validation.valid || (plan.approval.requireAll && (hasPending || hasRejected))) return false;
+  await rm(outputPath, { force: true });
+  if (approvals.planHash !== plan.planHash || validation.planHash !== plan.planHash || !validation.valid) return false;
+  const verifiedIds = new Set<string>();
+  for (const job of plan.jobs) {
+    const decision = approvals.decisions[job.id];
+    const item = validation.items.find(item => item.id === job.id);
+    if (decision?.status !== "approved" || !item?.valid || !item.sha256 || decision.candidateSha256 !== item.sha256) continue;
+    const candidate = path.resolve(path.dirname(outputPath), candidateDirectory, job.fileName);
+    if (!(await exists(candidate)) || await sha256File(candidate) !== item.sha256) continue;
+    verifiedIds.add(job.id);
+  }
+  const approvedJobs = plan.jobs.filter(job => verifiedIds.has(job.id));
+  if (!approvedJobs.length || (plan.approval.requireAll && approvedJobs.length !== plan.jobs.length)) return false;
 
   await writeJson(outputPath, {
     version: 1,
@@ -71,6 +91,7 @@ export const writeReleaseManifest = async (
         fingerprint: job.fingerprint,
         variables: job.variables,
         references: job.references,
+        referenceHashes: job.referenceHashes,
         approval: approvals.decisions[job.id],
       };
     }),

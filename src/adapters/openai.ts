@@ -31,7 +31,7 @@ export const openAIAdapter: GenerationAdapter = {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const referencePaths = context.job.references.map((reference) =>
       path.resolve(context.manifestDirectory, reference));
-    const size = `${context.plan.output.width}x${context.plan.output.height}`;
+    const size = `${context.job.output.width}x${context.job.output.height}`;
     let attempt = 0;
     let lastError: unknown;
 
@@ -48,14 +48,14 @@ export const openAIAdapter: GenerationAdapter = {
               prompt: context.job.prompt,
               quality: context.plan.generation.quality,
               size,
-              output_format: context.plan.output.format,
+              output_format: context.job.output.format,
             })
           : await client.images.generate({
               model: context.plan.generation.model,
               prompt: context.job.prompt,
               quality: context.plan.generation.quality,
               size,
-              output_format: context.plan.output.format,
+              output_format: context.job.output.format,
             });
         const encoded = response.data?.[0]?.b64_json;
         if (!encoded) throw new Error("OpenAI response did not include image bytes");
